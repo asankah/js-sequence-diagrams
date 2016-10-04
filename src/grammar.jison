@@ -13,23 +13,30 @@
 
 %%
 
-[\r\n]+           return 'NL';
 \s+               /* skip whitespace */
 \#[^\r\n]*        /* skip comments */
-"participant"     return 'participant';
-"left of"         return 'left_of';
-"right of"        return 'right_of';
-"over"            return 'over';
-"note"            return 'note';
-"title"           return 'title';
+"+"               return '+';
 ","               return ',';
-[^\->:,\r\n"]+    return 'ACTOR';
-\"[^"]+\"         return 'ACTOR';
 "--"              return 'DOTLINE';
 "-"               return 'LINE';
+"="               return '=';
 ">>"              return 'OPENARROW';
 ">"               return 'ARROW';
-:[^\r\n]+         return 'MESSAGE';
+"["               return 'OPENATTR';
+"]"               return 'CLOSEATTR';
+"as"              return 'as';
+"destroy"         return 'destroy';
+"end"             return 'end';
+"interaction"     return 'interaction';
+"left of"         return 'left_of';
+"note"            return 'note';
+"over"            return 'over';
+"participant"     return 'participant';
+"right of"        return 'right_of';
+"title"           return 'title';
+[^\-\+>:,\r\n\=[\]"\s]+    return 'TOKEN';
+\"[^"]+\"         return 'TOKEN';
+:[^\r\n\[\]]+     return 'MESSAGE';
 <<EOF>>           return 'EOF';
 .                 return 'INVALID';
 
@@ -44,25 +51,46 @@ start
 	;
 
 document
+	: title_statement participant_list interactions { yy.parser.yy.addInteractionList($3); }
+	;
+
+title_statement
 	: /* empty */
-	| document line
-	;
-
-line
-	: statement { }
-	| 'NL'
-	;
-
-statement
-	: 'participant' actor_alias { $2; }
-	| signal               { yy.parser.yy.addSignal($1); }
-	| note_statement       { yy.parser.yy.addSignal($1); }
 	| 'title' message      { yy.parser.yy.setTitle($2);  }
 	;
 
+participant_list
+	: participant_declaration participant_list
+	| /* empty */
+	;
+
+interactions
+	: /* empty */ { $$ = []; }
+	| interactions statement_or_interaction { $$ = $1; $$.push($2); }
+	;
+
+statement_or_interaction
+	: statement { $$ = $1; }
+	| interaction_block { $$ = $1; }
+	;
+
+interaction_block
+	: 'interaction' message attributes interactions 'end' { $$ = new Diagram.Interaction($2, $3, $4); }
+	;
+
+statement
+	: signal               { $$ = $1; }
+	| note_statement       { $$ = $1; }
+	;
+
+participant_declaration
+	: 'participant' TOKEN attributes { $$ = yy.parser.yy.getActor(Diagram.unescape($2), undefined, $3); }
+	| 'participant' TOKEN 'as' TOKEN attributes { $$ = yy.parser.yy.getActor(Diagram.unescape($4), Diagram.unescape($2), $5); }
+	;
+
 note_statement
-	: 'note' placement actor message   { $$ = new Diagram.Note($3, $2, $4); }
-	| 'note' 'over' actor_pair message { $$ = new Diagram.Note($3, Diagram.PLACEMENT.OVER, $4); }
+	: 'note' placement actor message attributes  { $$ = new Diagram.Note($3, $2, $4, $5); }
+	| 'note' 'over' actor_pair message attributes { $$ = new Diagram.Note($3, Diagram.PLACEMENT.OVER, $4, $5); }
 	;
 
 actor_pair
@@ -76,16 +104,22 @@ placement
 	;
 
 signal
-	: actor signaltype actor message
+	: execution_occurrence signaltype execution_occurrence message attributes
 	{ $$ = new Diagram.Signal($1, $2, $3, $4); }
 	;
 
-actor
-	: ACTOR { $$ = yy.parser.yy.getActor(Diagram.unescape($1)); }
+execution_occurrence
+	: actor { $$ = new Diagram.ExecutionOccurrence($1, Diagram.EXECUTION.NONE); }
+	| execution actor { $$ = new Diagram.ExecutionOccurrence($2, $1); }
 	;
 
-actor_alias
-	: ACTOR { $$ = yy.parser.yy.getActorWithAlias(Diagram.unescape($1)); }
+execution
+	: '+' { $$ = Diagram.EXECUTION.START; }
+	| LINE { $$ = Diagram.EXECUTION.FINISH; }
+	;
+
+actor
+	: TOKEN { $$ = yy.parser.yy.getActor(Diagram.unescape($1)); }
 	;
 
 signaltype
@@ -107,5 +141,18 @@ message
 	: MESSAGE { $$ = Diagram.unescape($1.substring(1)); }
 	;
 
+attributes
+        : /* empty */
+	| OPENATTR attribute_list CLOSEATTR { $$ = $2; }
+	;
+
+attribute_list
+	: attribute { $$ = [$1]; }
+	| attribute_list ',' attribute { $1.push($3); $$ = $1; }
+	;
+
+attribute
+	: TOKEN '=' TOKEN { $$ = [Diagram.unescape($1), Diagram.unescape($3)]; }
+	;
 
 %%

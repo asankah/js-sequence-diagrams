@@ -158,21 +158,22 @@ test( "Notes", function() {
 	assertSingleNote(Diagram.parse("Note right of A: Message"), PLACEMENT.RIGHTOF, 'A');
 	assertSingleNote(Diagram.parse("Note over A: Message"), PLACEMENT.OVER, 'A');
 	assertSingleNote(Diagram.parse("Note over A,B: Message"), PLACEMENT.OVER, ['A', 'B']);
-
-	// We don't allow "as X" when referencing an actor
-	assertSingleNote(Diagram.parse("Note over C as A,B: Message"), PLACEMENT.OVER, ['C as A', 'B']);
 });
 
 
 test( "Participants", function() {
 	assertSingleActor(Diagram.parse("Participant Bob"), "Bob");
-	assertSingleActor(Diagram.parse("Participant Name with spaces"), "Name with spaces");
-	assertSingleActor(Diagram.parse("Participant Name with spaces as alias"), "alias", "Name with spaces");
-	assertSingleActor(Diagram.parse("Participant Name with 'as' in it"), "Name with 'as' in it");
-	assertSingleActor(Diagram.parse("Participant Double as as alias"), "alias", "Double as");
-	assertSingleActor(Diagram.parse("Participant Bob \\n with newline"), "Bob \n with newline");
-	assertSingleActor(Diagram.parse("Participant Bob \\n with newline as alias"), "alias", "Bob \n with newline");
 	assertSingleActor(Diagram.parse("Participant Object"), "Object");
+	assertSingleActor(Diagram.parse("Participant Object [foo=bar]"), "Object");
+	assertSingleActor(Diagram.parse("Participant (any) as A [foo=bar]"), "A", "(any)");
+
+        var d = Diagram.parse("Participant A as B [foo=bar,bar=baz,q=\"a b c d\"]");
+        assertSingleActor(d, "B", "A");
+        deepEqual(d.actors[0].attributes, [["foo","bar"], ["bar", "baz"], ["q", "a b c d"]]);
+
+        d = Diagram.parse("Participant A as B\r\nParticipant C as D\r\n");
+        ok(d);
+        equal(d.actors.length, 2);
 });
 
 test( "Newlines", function() {
@@ -187,6 +188,15 @@ test( "Quoted names", function() {
 	assertSingleActor(Diagram.parse("Participant \"->:\""), "->:");
 });
 
+test( "Interactions", function() {
+        var d = Diagram.parse("interaction: something\r\nA->B:Hello\r\nend");
+        equal(d.actors.length, 2);
+        equal(d.actors[0].name, "A");
+        equal(d.actors[1].name, "B");
+        equal(d.signals.length, 3);
+        equal(d.signals[0].type, "Interaction");
+});
+
 test( "API", function() {
 	// Public API
 	ok(typeof Diagram.parse == "function");
@@ -197,7 +207,6 @@ test( "API", function() {
 
 	// Private API
 	ok(typeof d.getActor == "function");
-	ok(typeof d.getActorWithAlias == "function");
 	ok(typeof d.setTitle == "function");
 	ok(typeof d.addSignal == "function");
 });

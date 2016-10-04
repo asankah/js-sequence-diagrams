@@ -29,6 +29,11 @@
 	var NOTE_PADDING  = 5; // Padding inside a note
 	var NOTE_OVERLAP  = 15; // Overlap when using a "note over A,B"
 
+        var EXECUTION_WIDTH = 16;
+        var EXECUTION_OVERLAP = 4;
+
+        var INTERACTION_PADDING = NOTE_PADDING;
+
 	var TITLE_MARGIN   = 0;
 	var TITLE_PADDING  = 5;
 
@@ -227,10 +232,11 @@
 			this._paper.setSize(diagram.width, diagram.height);
 
 			var y = DIAGRAM_MARGIN + title_height;
+                        var signalsY = y + this._actors_height;
 
 			this.draw_title();
-			this.draw_actors(y);
-			this.draw_signals(y + this._actors_height);
+			this.draw_actors(y, signalsY);
+			this.draw_signals(signalsY);
 
 			this._paper.setFinish();
 		},
@@ -303,6 +309,7 @@
 				s.text_bb = bb;
 				s.width   = bb.width;
 				s.height  = bb.height;
+                                s.offsetY = self._signals_height;
 
 				var extra_width = 0;
 
@@ -350,6 +357,20 @@
 
 						return; // Bail out early
 					}
+                                } else if (s.type == "Interaction") {
+					s.width  += (NOTE_MARGIN + NOTE_PADDING) * 2;
+					s.height += (NOTE_MARGIN + NOTE_PADDING) * 2;
+
+					// HACK lets include the actor's padding
+					extra_width = 2 * ACTOR_MARGIN;
+
+                                        a = 0;
+                                        b = actors.length - 1;
+                                        extra_width = - (NOTE_PADDING * 2 + NOTE_OVERLAP * 2);
+                                } else if (s.type == "Padding") {
+					s.height += (SIGNAL_MARGIN + SIGNAL_PADDING) * 2;
+                                        a = 0;
+                                        b = actors.length - 1;
 				} else {
 					throw new Error("Unhandled signal type:" + s.type);
 				}
@@ -393,7 +414,7 @@
 				this.draw_text_box(title, title.message, TITLE_MARGIN, TITLE_PADDING, this._font);
 		},
 
-		draw_actors : function(offsetY) {
+		draw_actors : function(offsetY, signalsY) {
 			var y = offsetY;
 			var self = this;
 			_.each(this.diagram.actors, function(a) {
@@ -409,13 +430,25 @@
 					aX, y + self._actors_height - ACTOR_MARGIN,
 					aX, y + self._actors_height + ACTOR_MARGIN + self._signals_height);
 				line.attr(LINE);
+
+                                // ExecutionSpecifications
+                                console.dir(a.executionSpecifications);
+                                _.each(a.executionSpecifications, function(s) {
+                                  var relY1 = s.signalA.offsetY + s.signalA.height - SIGNAL_MARGIN - SIGNAL_PADDING;
+                                  var relY2 = s.signalB.offsetY + s.signalB.height - SIGNAL_MARGIN - SIGNAL_PADDING;
+                                  s.offsetX = aX - EXECUTION_WIDTH / 2 + s.level * EXECUTION_OVERLAP; 
+                                  s.offsetY = relY1 + signalsY;
+                                  s.height = relY2 - relY1;
+                                  var r = self.draw_rect(s.offsetX, s.offsetY, EXECUTION_WIDTH, s.height);
+                                  r.attr({'fill':'#fff', 'stroke':'#000', 'stroke-width':2});
+                                });
 			});
 		},
 
 		draw_actor : function (actor, offsetY, height) {
 			actor.y      = offsetY;
 			actor.height = height;
-			this.draw_text_box(actor, actor.name, ACTOR_MARGIN, ACTOR_PADDING, this._font);
+			this.draw_text_box(actor, actor.name, ACTOR_MARGIN, ACTOR_PADDING, this._font, actor.attributes);
 		},
 
 		draw_signals : function (offsetY) {
@@ -431,7 +464,9 @@
 
 				} else if (s.type == "Note") {
 					self.draw_note(s, y);
-				}
+				} else if (s.type == "Interaction") {
+                                        self.draw_interaction(s, y, offsetY);
+                                }
 
 				y += s.height;
 			});
@@ -481,6 +516,26 @@
 
 			// Draw the line along the bottom of the signal
 			y = offsetY + signal.height - SIGNAL_MARGIN - SIGNAL_PADDING;
+                        _.each(signal.actorA.executionSpecifications, function(s) {
+                          if (s.offsetY > y || s.offsetY + s.height < y) {
+                            return;
+                          }
+                          if (aX < bX) {
+                            aX = Math.max(aX, s.offsetX + EXECUTION_WIDTH);
+                          } else {
+                            aX = Math.min(aX, s.offsetX);
+                          }
+                        });
+                        _.each(signal.actorB.executionSpecifications, function(s) {
+                          if (s.offsetY > y || s.offsetY + s.height < y) {
+                            return;
+                          }
+                          if (aX < bX) {
+                            bX = Math.min(bX, s.offsetX);
+                          } else {
+                            bX = Math.max(bX, s.offsetX + EXECUTION_WIDTH);
+                          }
+                        });
 			var line = this.draw_line(aX, y, bX, y);
 			line.attr(LINE);
 			line.attr({
@@ -518,15 +573,47 @@
 					throw new Error("Unhandled note placement:" + note.placement);
 			}
 
-			this.draw_text_box(note, note.message, NOTE_MARGIN, NOTE_PADDING, this._font);
+			this.draw_text_box(note, note.message, NOTE_MARGIN, NOTE_PADDING, this._font, note.attributes);
 		},
+
+                draw_interaction : function(interaction, offsetY, signalsY) {
+			interaction.y = offsetY;
+			var actorA = this.diagram.actors[0];
+                        var actorB = this.diagram.actors[this.diagram.actors.length - 1];
+			var aX = getCenterX( actorA );
+                        var bX = getCenterX( actorB );
+                        var overlap = NOTE_OVERLAP + NOTE_PADDING;
+                        interaction.x = Math.min(aX,bX) - overlap;
+                        interaction.width = (Math.max(aX,bX) + overlap) - interaction.x;
+
+			this.draw_text_box(interaction, interaction.message,
+                            NOTE_MARGIN, NOTE_PADDING, this._font, interaction.attributes);
+
+                        var bottomY = interaction.lastChild.offsetY + signalsY;
+                        var rect = this.draw_rect(interaction.x, interaction.y, interaction.width, bottomY - offsetY);
+                        rect.attr(LINE);
+                },
+
+                apply_attributes : function(attr, attributes) {
+                        if (_.isArray(attributes)) {
+                          var attr_copy = {};
+                          for (var k in attr) {
+                            attr_copy[k] = attr[k];
+                          }
+                          _.each(attributes, function(attributePair) {
+                            attr_copy[attributePair[0]] = attributePair[1];
+                          });
+                          attr = attr_copy;
+                        }
+                        return attr;
+                },
 
 		/**
 		 * Draws text with a white background
 		 * x,y (int) x,y center point for this text
 		 * TODO Horz center the text when it's multi-line print
 		 */
-		draw_text : function (x, y, text, font) {
+		draw_text : function (x, y, text, font, attributes) {
 			var paper = this._paper;
 			var f = font || {};
 			var t;
@@ -539,12 +626,12 @@
 			// draw a rect behind it
 			var bb = t.getBBox();
 			var r = paper.rect(bb.x, bb.y, bb.width, bb.height);
-			r.attr({'fill': "#fff", 'stroke': 'none'});
+			r.attr(this.apply_attributes({'fill': "#fff", 'stroke': 'none'}, attributes));
 
 			t.toFront();
 		},
 
-		draw_text_box : function (box, text, margin, padding, font) {
+		draw_text_box : function (box, text, margin, padding, font, attributes) {
 			var x = box.x + margin;
 			var y = box.y + margin;
 			var w = box.width  - 2 * margin;
@@ -552,13 +639,13 @@
 
 			// Draw inner box
 			var rect = this.draw_rect(x, y, w, h);
-			rect.attr(LINE);
+			rect.attr(this.apply_attributes(LINE, attributes));
 
 			// Draw text (in the center)
 			x = getCenterX(box);
 			y = getCenterY(box);
 
-			this.draw_text(x, y, text, font);
+			this.draw_text(x, y, text, font, attributes);
 		}
 
 		/**
